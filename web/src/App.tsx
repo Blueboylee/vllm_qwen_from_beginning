@@ -81,7 +81,7 @@ function App() {
         <div className="header-content">
           <div>
             <h1 className="title">Qwen AI 推理服务</h1>
-            <span className="subtitle">本地 Qwen 2.5 3B · vLLM · Continuous Batching</span>
+            <span className="subtitle">本地 Qwen 2.5 7B GPTQ-Int8 · vLLM · Continuous Batching</span>
           </div>
           <div className="tabs">
             <button

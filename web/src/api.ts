@@ -6,7 +6,7 @@ export async function streamChat(
   messages: Message[],
   onDelta: (text: string) => void,
   onDone?: () => void,
-  model = 'qwen-3b',
+  model = 'qwen',
   maxTokens = 1500,
   temperature = 0.5
 ): Promise<void> {

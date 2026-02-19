@@ -167,34 +167,43 @@ npm run dev
 
 ## 架构图 | Architecture
 
+### 统一后端模式（推荐）| Unified Server Mode (Recommended)
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     WSL2 (Linux)                            │
-│  ┌───────────────────────────────────┐                      │
-│  │  vLLM (Qwen 2.5)                 │                      │
-│  │  :8000/v1/chat/completions        │ ◄── OpenAI API      │
-│  │  :8000/metrics                    │ ◄── Prometheus       │
-│  └───────────────────────────────────┘                      │
-└─────────────────────────────────────────────────────────────┘
-                          │
-          ┌───────────────┼───────────────┐
-          ▼               ▼               ▼
-┌─────────────────────────────────────────────────────────────┐
-│                   Windows (Host)                            │
-│                                                             │
-│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  │
-│  │ gpu_monitor   │  │ gpu_ws_monitor   │  │  Vite Dev    │  │
-│  │ :5000 (REST)  │  │ :5001 (Socket.IO)│  │  :3000       │  │
-│  │ nvidia-smi    │  │ pynvml           │  │  React App   │  │
-│  └──────────────┘  └──────────────────┘  └──────────────┘  │
-│          │                  │   WebSocket       │           │
-│          └──────────────────┼───────────────────┘           │
-│                             ▼                               │
-│                    ┌────────────────┐                        │
-│                    │   Browser UI   │                        │
-│                    │  Chat│Monitor│GPU                       │
-│                    └────────────────┘                        │
-└─────────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────┐
+│              server.py  (port 8000)                   │
+│                                                      │
+│  ┌─────────────────┐    ┌────────────────────────┐   │
+│  │  vLLM Engine     │    │  GPU Monitor (pynvml)  │   │
+│  │  AsyncLLMEngine  │    │  500ms WebSocket push  │   │
+│  └────────┬────────┘    └───────────┬────────────┘   │
+│           │                         │                 │
+│  ┌────────┴─────────────────────────┴──────────────┐ │
+│  │              FastAPI + Socket.IO                 │ │
+│  │  POST /v1/chat/completions  (streaming SSE)     │ │
+│  │  GET  /metrics              (Prometheus)        │ │
+│  │  GET  /api/gpu              (REST)              │ │
+│  │  WS   /gpu                  (Socket.IO)         │ │
+│  └─────────────────────────────────────────────────┘ │
+└──────────────────────┬───────────────────────────────┘
+                       │
+              ┌────────┴────────┐
+              │  Vite Dev :3000  │
+              │  (proxy → 8000)  │
+              └────────┬────────┘
+                       │
+              ┌────────┴────────┐
+              │   Browser UI    │
+              │ Chat│Monitor│GPU │
+              └─────────────────┘
+```
+
+### 分离模式 | Separate Mode
+
+```
+WSL2: vLLM :8000 ──┐
+                    ├──► Vite :3000 ──► Browser
+Windows: GPU :5001 ─┘
 ```
 
 ---
@@ -203,12 +212,16 @@ npm run dev
 
 | 变量 / Variable | 默认值 / Default | 说明 / Description |
 |---|---|---|
-| `VITE_GPU_WS_URL` | `http://localhost:5001` | GPU WebSocket 服务地址 / GPU WebSocket service URL |
+| `VITE_GPU_WS_URL` | *(空，同源)* | GPU WebSocket 服务地址 / GPU WebSocket service URL |
+
+统一后端模式下，前端通过 Vite 代理自动连接到 `:8000`，无需额外配置。
+
+In unified mode, the frontend auto-connects via Vite proxy to `:8000`, no extra config needed.
 
 如需连接远程 GPU 服务器，在 `web/.env` 中设置 / To connect to a remote GPU server, set in `web/.env`:
 
 ```env
-VITE_GPU_WS_URL=http://your-server-ip:5001
+VITE_GPU_WS_URL=http://your-server-ip:8000
 ```
 
 ---
@@ -219,9 +232,10 @@ Vite 开发服务器代理规则（`web/vite.config.ts`）/ Vite dev server prox
 
 | 路径 / Path | 目标 / Target | 用途 / Purpose |
 |---|---|---|
-| `/v1/*` | `http://localhost:8000` | vLLM OpenAI API |
-| `/metrics` | `http://localhost:8000` | vLLM Prometheus metrics |
-| `/api/*` | `http://localhost:5000` | GPU REST monitor |
+| `/v1/*` | `http://localhost:8000` | OpenAI 兼容 API / Chat completions |
+| `/metrics` | `http://localhost:8000` | Prometheus 指标 / Metrics |
+| `/api/*` | `http://localhost:8000` | GPU REST 接口 / GPU REST API |
+| `/socket.io` | `http://localhost:8000` | GPU WebSocket (Socket.IO) |
 
 ---
 
