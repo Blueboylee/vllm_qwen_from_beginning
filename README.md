@@ -1,134 +1,307 @@
-# Qwen AI 推理服务 - 完整项目
+# Qwen vLLM 推理服务 & 实时 GPU 监控
 
-这是一个完整的 AI 推理服务入门项目，包含：
-- **vLLM 推理服务**（WSL 中运行）
-- **ChatGPT 风格的 Web 对话界面**（React + 流式输出）
-- **实时监控仪表板**（GPU、吞吐量、延迟等指标）
+# Qwen vLLM Inference Service & Real-time GPU Monitor
 
-## 项目结构
+---
+
+## 简介 | Introduction
+
+**中文**
+
+一个完整的本地大模型推理 + 实时监控项目。在 WSL 中使用 vLLM 运行 Qwen 2.5 模型，配合 React Web 界面提供：
+
+- ChatGPT 风格的流式对话
+- vLLM 推理指标监控（KV Cache、吞吐量、延迟等）
+- 基于 WebSocket 的实时 GPU 硬件监控（显存、SM 利用率、功耗、温度、PCIe 吞吐量）
+
+**English**
+
+A complete local LLM inference + real-time monitoring project. Run Qwen 2.5 with vLLM in WSL, paired with a React web UI that provides:
+
+- ChatGPT-style streaming chat
+- vLLM inference metrics monitoring (KV Cache, throughput, latency, etc.)
+- WebSocket-based real-time GPU hardware monitoring (VRAM, SM utilization, power draw, temperature, PCIe throughput)
+
+---
+
+## 项目结构 | Project Structure
 
 ```
-project/
-├── main.py                    # vLLM 模型加载示例（参考）
-├── web/                       # React Web 应用
-│   ├── src/
-│   │   ├── App.tsx           # 主应用（聊天 + 监控切换）
-│   │   ├── Monitor.tsx       # 监控仪表板
-│   │   ├── api.ts            # API 客户端（流式调用）
-│   │   └── ...
-│   └── package.json
-└── docs/
-    └── CONTINUOUS_BATCHING.md # Continuous Batching 说明文档
+vllm_qwen_from_beginning/
+├── main.py                  # vLLM 离线推理示例 / Offline inference example
+├── gpu_monitor.py           # GPU 监控 REST API (轮询) / GPU monitor REST API (polling)
+├── gpu_ws_monitor.py        # GPU 监控 WebSocket 服务 / GPU monitor WebSocket service
+├── requirements_monitor.txt # Python 依赖 / Python dependencies
+├── docs/
+│   ├── VLLM_METRICS_SETUP.md
+│   └── CONTINUOUS_BATCHING.md
+└── web/                     # React 前端 / React frontend
+    ├── package.json
+    ├── vite.config.ts
+    └── src/
+        ├── App.tsx          # 主应用：对话 + 监控 + GPU 三标签页 / Main app: Chat + Monitor + GPU tabs
+        ├── api.ts           # vLLM OpenAI 兼容流式 API / Streaming API client
+        ├── Monitor.tsx      # vLLM Prometheus 指标面板 / vLLM metrics dashboard
+        ├── GpuDashboard.tsx # 实时 GPU 面板 (Socket.IO + Recharts) / Real-time GPU dashboard
+        └── ...
 ```
 
-## 功能特性
+---
 
-### 1. 对话界面 💬
-- ChatGPT 风格的 UI
-- **流式输出**：逐字显示，实时响应
-- 多轮对话支持
-- 深色主题
+## 技术栈 | Tech Stack
 
-### 2. 监控仪表板 📊
-- **实时指标**：每 2 秒自动刷新
-- **关键指标卡片**：
-  - KV Cache 使用率
-  - 吞吐量 (tokens/s)
-  - 平均延迟
-  - 队列长度
-- **详细统计**：
-  - 资源使用（运行中/等待中的请求）
-  - 吞吐量统计（生成 tokens、prompt tokens）
-  - 延迟统计（P50/P95/P99、TTFT）
-- **实时图表**：每个指标都有小型趋势图
+| 层 / Layer | 技术 / Technology |
+|---|---|
+| LLM 推理 / Inference | [vLLM](https://docs.vllm.ai/) + Qwen 2.5 (WSL / Linux) |
+| GPU 数据采集 / GPU Data | [pynvml](https://pypi.org/project/pynvml/) (NVIDIA NVML) |
+| 后端推送 / Backend Push | Flask + Flask-SocketIO (WebSocket, 500ms interval) |
+| REST 监控 / REST Monitor | Flask + nvidia-smi subprocess (polling, 2s interval) |
+| 前端 / Frontend | React 18 + TypeScript + Vite |
+| 图表 / Charts | [Recharts](https://recharts.org/) |
+| 实时通信 / Realtime | [Socket.IO](https://socket.io/) client |
 
-### 3. Continuous Batching ✅
-- vLLM **默认启用** Continuous Batching
-- 动态批处理，提高 GPU 利用率
-- PagedAttention 优化 KV cache
+---
 
-## 快速开始
+## 快速开始 | Quick Start
 
-### 1. 启动 vLLM 服务（WSL）
+### 前置条件 | Prerequisites
+
+- Windows 10/11 + WSL2（运行 vLLM）
+- NVIDIA GPU + 驱动（Windows 侧可运行 `nvidia-smi`）
+- Python 3.10+
+- Node.js 18+
+
+### 1. 启动 vLLM 服务（WSL） | Start vLLM Service (WSL)
 
 ```bash
-# 在 WSL 中启动 OpenAI 兼容 API 服务器
+# 在 WSL 中 / In WSL
 python -m vllm.entrypoints.openai.api_server \
   --model qwen/Qwen2.5-3B-Instruct \
   --port 8000 \
   --host 0.0.0.0
 ```
 
-### 2. 启动 Web 界面
+### 2. 安装后端依赖 | Install Backend Dependencies
+
+```powershell
+# 在 Windows PowerShell 中 / In Windows PowerShell
+pip install -r requirements_monitor.txt
+```
+
+依赖列表 / Dependencies:
+
+```
+flask==3.0.0
+flask-cors==4.0.0
+flask-socketio==5.3.6
+python-socketio==5.10.0
+python-engineio==4.8.0
+pynvml==11.5.0
+```
+
+### 3. 启动 GPU 监控服务 | Start GPU Monitor
+
+有两种 GPU 监控模式可选 / Two GPU monitoring modes available:
+
+**模式 A: WebSocket 实时推送（推荐）/ Mode A: WebSocket Real-time Push (Recommended)**
+
+```powershell
+python gpu_ws_monitor.py
+# 服务地址 / Service: http://localhost:5001
+# 推送间隔 / Push interval: 500ms
+```
+
+**模式 B: REST API 轮询 / Mode B: REST API Polling**
+
+```powershell
+python gpu_monitor.py
+# 服务地址 / Service: http://localhost:5000/api/gpu
+```
+
+### 4. 启动前端 | Start Frontend
 
 ```powershell
 cd web
 npm install
 npm run dev
+# 浏览器访问 / Open browser: http://localhost:3000
 ```
 
-浏览器打开 **http://localhost:3000**
+---
 
-## 监控指标说明
+## 功能介绍 | Features
 
-### KV Cache 使用率
-- **绿色** (< 70%)：正常
-- **黄色** (70-90%)：较高，注意监控
-- **红色** (> 90%)：接近上限，可能需要优化
+### 对话界面 | Chat Interface
 
-### 吞吐量 (tokens/s)
-- 反映模型的推理速度
-- 受批处理大小、序列长度、GPU 性能影响
+- ChatGPT 风格 UI，深色主题 / ChatGPT-style UI with dark theme
+- 流式输出，逐字显示 / Streaming output, token by token
+- 多轮对话上下文 / Multi-turn conversation context
+- 调用 vLLM 的 OpenAI 兼容 API (`/v1/chat/completions`) / Uses vLLM's OpenAI-compatible API
 
-### 延迟统计
-- **P50**：中位数延迟
-- **P95**：95% 请求的延迟
-- **P99**：99% 请求的延迟（最坏情况）
-- **TTFT**：首 Token 延迟（Time To First Token）
+### vLLM 监控面板 | vLLM Metrics Dashboard
 
-### 队列长度
-- 等待处理的请求数
-- 如果持续 > 10，考虑增加 GPU 或优化模型
+- 每 2 秒自动拉取 `/metrics`（Prometheus 格式）/ Auto-fetches `/metrics` every 2s (Prometheus format)
+- 关键指标卡片 + 趋势小图 / Key metric cards with mini sparklines
 
-## API 端点
+| 指标 / Metric | 说明 / Description |
+|---|---|
+| KV Cache 使用率 / KV Cache Usage | KV 缓存占用百分比 / KV cache utilization percentage |
+| 吞吐量 / Throughput | tokens/s（基于差分计算）/ tokens/s (delta-based) |
+| 延迟 / Latency | P50 / P95 / P99 / TTFT |
+| 队列长度 / Queue Length | 等待处理的请求数 / Pending requests count |
 
-- `/v1/chat/completions` - OpenAI 兼容的聊天完成 API
-- `/metrics` - Prometheus 格式的监控指标
+### GPU 实时面板 | Real-time GPU Dashboard
 
-## 技术栈
+- 基于 Socket.IO 的 WebSocket 推送，500ms 刷新 / Socket.IO WebSocket push, 500ms refresh
+- 6 张实时折线图 / 6 real-time line charts:
 
-- **后端**：vLLM（Python）
-- **前端**：React + TypeScript + Vite
-- **监控**：Prometheus 格式指标 + 自定义解析
+| 图表 / Chart | 指标 / Metrics |
+|---|---|
+| VRAM Alloc vs Total | 已用显存 vs 总显存 (MB) / Used vs Total VRAM (MB) |
+| SM / 显存控制器利用率 | GPU 核心 + 显存带宽利用率 (%) / SM + Memory controller utilization (%) |
+| GPU 功耗 | 实时功耗 (W) / Real-time power draw (W) |
+| PCIe 吞吐量 | Host↔GPU 传输速率 (KB/s) / Host↔GPU transfer rate (KB/s) |
+| GPU 温度 | 核心温度 (°C) / Core temperature (°C) |
 
-## 学习资源
+---
 
-- [vLLM 官方文档](https://docs.vllm.ai/)
-- [Continuous Batching 说明](./docs/CONTINUOUS_BATCHING.md)
-- [PagedAttention 论文](https://arxiv.org/abs/2309.06180)
+## 架构图 | Architecture
 
-## 常见问题
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     WSL2 (Linux)                            │
+│  ┌───────────────────────────────────┐                      │
+│  │  vLLM (Qwen 2.5)                 │                      │
+│  │  :8000/v1/chat/completions        │ ◄── OpenAI API      │
+│  │  :8000/metrics                    │ ◄── Prometheus       │
+│  └───────────────────────────────────┘                      │
+└─────────────────────────────────────────────────────────────┘
+                          │
+          ┌───────────────┼───────────────┐
+          ▼               ▼               ▼
+┌─────────────────────────────────────────────────────────────┐
+│                   Windows (Host)                            │
+│                                                             │
+│  ┌──────────────┐  ┌──────────────────┐  ┌──────────────┐  │
+│  │ gpu_monitor   │  │ gpu_ws_monitor   │  │  Vite Dev    │  │
+│  │ :5000 (REST)  │  │ :5001 (Socket.IO)│  │  :3000       │  │
+│  │ nvidia-smi    │  │ pynvml           │  │  React App   │  │
+│  └──────────────┘  └──────────────────┘  └──────────────┘  │
+│          │                  │   WebSocket       │           │
+│          └──────────────────┼───────────────────┘           │
+│                             ▼                               │
+│                    ┌────────────────┐                        │
+│                    │   Browser UI   │                        │
+│                    │  Chat│Monitor│GPU                       │
+│                    └────────────────┘                        │
+└─────────────────────────────────────────────────────────────┘
+```
 
-### Q: 为什么监控面板显示 "错误"？
-A: 确保 vLLM 服务已启动并暴露在 `localhost:8000`，且 `/metrics` 端点可访问。
+---
 
-### Q: 如何提高吞吐量？
-A: 
-1. 增加 `max_model_len`（如果显存允许）
-2. 调整 `gpu_memory_utilization`
-3. 使用更强大的 GPU
-4. 优化批处理大小
+## 环境变量 | Environment Variables
 
-### Q: KV Cache 使用率过高怎么办？
-A:
-1. 降低 `max_model_len`
-2. 减少 `gpu_memory_utilization`
-3. 使用量化模型（如 AWQ、GPTQ）
+| 变量 / Variable | 默认值 / Default | 说明 / Description |
+|---|---|---|
+| `VITE_GPU_WS_URL` | `http://localhost:5001` | GPU WebSocket 服务地址 / GPU WebSocket service URL |
 
-## 下一步
+如需连接远程 GPU 服务器，在 `web/.env` 中设置 / To connect to a remote GPU server, set in `web/.env`:
 
-- [ ] 添加多模型支持
-- [ ] 实现请求限流
-- [ ] 添加日志记录
-- [ ] 集成 Grafana 可视化
-- [ ] 添加健康检查端点
+```env
+VITE_GPU_WS_URL=http://your-server-ip:5001
+```
+
+---
+
+## 代理配置 | Proxy Configuration
+
+Vite 开发服务器代理规则（`web/vite.config.ts`）/ Vite dev server proxy rules:
+
+| 路径 / Path | 目标 / Target | 用途 / Purpose |
+|---|---|---|
+| `/v1/*` | `http://localhost:8000` | vLLM OpenAI API |
+| `/metrics` | `http://localhost:8000` | vLLM Prometheus metrics |
+| `/api/*` | `http://localhost:5000` | GPU REST monitor |
+
+---
+
+## 故障排除 | Troubleshooting
+
+### pynvml / nvidia-smi 不可用
+
+- 确保已安装 NVIDIA 驱动 / Ensure NVIDIA driver is installed
+- 在 PowerShell 运行 `nvidia-smi` 验证 / Run `nvidia-smi` in PowerShell to verify
+- 如果在 WSL 中跑模型、Windows 跑监控，Windows 侧需要能访问 GPU / If running model in WSL but monitor on Windows, ensure GPU is accessible from Windows
+
+### 前端显示「连接失败」/ Frontend shows "Connection Failed"
+
+- 确认 `gpu_ws_monitor.py` 已启动 / Ensure `gpu_ws_monitor.py` is running
+- 检查 `http://localhost:5001` 可访问 / Check `http://localhost:5001` is reachable
+- 检查防火墙是否拦截端口 / Check firewall for port blocking
+
+### vLLM metrics 全为 0 / vLLM Metrics Are All Zero
+
+- 确保 vLLM 服务已启动且处理过至少一个请求 / Ensure vLLM is running and has processed at least one request
+- 访问 `http://localhost:8000/metrics` 检查原始数据 / Visit `http://localhost:8000/metrics` to check raw data
+- 使用监控面板的「显示调试」按钮查看原始返回 / Use the "Show Debug" button to inspect raw response
+
+### PCIe 数据为 0 / PCIe Data Shows Zero
+
+- 部分驱动或 GPU 不支持 `nvmlDeviceGetPcieThroughput`，可忽略 / Some drivers/GPUs don't support this API; safe to ignore
+
+---
+
+## 监控指标说明 | Metrics Reference
+
+### GPU 硬件指标 / GPU Hardware Metrics
+
+| 指标 / Metric | 说明 / Description | 调优建议 / Tuning Hints |
+|---|---|---|
+| VRAM Used / Total | 显存占用 / VRAM usage | vLLM 会预分配 KV Cache 池 / vLLM pre-allocates KV Cache pool |
+| SM 利用率 / SM Utilization | 流处理器核心占用 / Streaming multiprocessor usage | 低 SM + 高 MemUtil → Memory-bound |
+| 显存控制器利用率 / Memory Controller Util | 显存带宽占用 / Memory bandwidth usage | 高值说明带宽瓶颈 / High value indicates bandwidth bottleneck |
+| 功耗 / Power Draw | GPU 功耗 (W) | 未跑满说明算子未充分利用 / Not maxed means underutilized compute |
+| PCIe 吞吐量 / PCIe Throughput | Host↔GPU 传输 (KB/s) | 超长上下文时关键 / Critical for very long contexts |
+| 温度 / Temperature | GPU 核心温度 (°C) | >85°C 注意散热 / >85°C check cooling |
+
+### vLLM 推理指标 / vLLM Inference Metrics
+
+| 指标 / Metric | 说明 / Description |
+|---|---|
+| KV Cache Usage | KV 缓存利用率，>90% 需优化 / KV cache util, optimize if >90% |
+| Throughput | 每秒生成 tokens 数 / Generated tokens per second |
+| Latency (P50/P95/P99) | 请求延迟分布 / Request latency distribution |
+| TTFT | 首 Token 延迟 / Time To First Token |
+| Queue Length | 排队请求数，持续 >10 需扩容 / Pending requests, scale if consistently >10 |
+
+---
+
+## 常见问题 | FAQ
+
+**Q: 如何提高吞吐量？/ How to improve throughput?**
+
+1. 增大 `max_model_len`（显存允许时）/ Increase `max_model_len` (if VRAM allows)
+2. 调整 `gpu_memory_utilization` / Tune `gpu_memory_utilization`
+3. 使用量化模型（AWQ / GPTQ）/ Use quantized models (AWQ / GPTQ)
+4. 升级 GPU / Upgrade GPU
+
+**Q: KV Cache 过高怎么办？/ What if KV Cache usage is too high?**
+
+1. 降低 `max_model_len` / Lower `max_model_len`
+2. 减小 `gpu_memory_utilization` / Reduce `gpu_memory_utilization`
+3. 使用量化模型减少显存占用 / Use quantized models to reduce VRAM footprint
+
+---
+
+## 许可证 | License
+
+[MIT License](./LICENSE) - Copyright (c) 2026 Blueboylee
+
+---
+
+## 学习资源 | Resources
+
+- [vLLM 官方文档 / vLLM Docs](https://docs.vllm.ai/)
+- [PagedAttention 论文 / Paper](https://arxiv.org/abs/2309.06180)
+- [Continuous Batching 说明 / Guide](./docs/CONTINUOUS_BATCHING.md)
+- [vLLM Metrics 设置 / Setup](./docs/VLLM_METRICS_SETUP.md)
