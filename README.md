@@ -136,6 +136,86 @@ npm run dev
 
 ---
 
+## Windows + WSL2 Infra Guide (Qwen2.5-7B GPTQ-Int8)
+
+This section documents how to set up a **Windows + WSL2** environment optimized for **Qwen2.5-7B-Instruct GPTQ-Int8** on a **12GB GPU (e.g. RTX 4070)** using vLLM.
+
+### Infra Stack
+
+- **Model**: Qwen2.5-7B-Instruct-GPTQ-Int8  
+- **Engine**: vLLM ≥ 0.15.1 (supports `gptq_marlin` and `fp8_kv_cache`)  
+- **Backend**: CUDA 12.x / Triton  
+- **Platform**: WSL2 (Ubuntu 22.04)  
+- **Hardware**: NVIDIA RTX 4070 (12GB VRAM) or similar  
+
+### Step 0: Install WSL2 and Ubuntu 22.04 (Windows)
+
+In Windows PowerShell (as Administrator):
+
+```powershell
+# Install WSL with Ubuntu 22.04
+wsl --install -d Ubuntu-22.04
+
+# Reboot if prompted, then verify
+wsl -l -v
+```
+
+After installation, open **Ubuntu 22.04** from the Start menu, create your Linux user, and update the system:
+
+```bash
+sudo apt update && sudo apt upgrade -y
+```
+
+### Step 1: Prepare Python Environment in WSL2
+
+Inside WSL (Ubuntu 22.04), it is recommended to use **conda** to isolate your AI infra environment:
+
+```bash
+# Create and activate environment
+conda create -n ai-infra python=3.10 -y
+conda activate ai-infra
+
+# Install core dependencies (using Aliyun mirror for speed)
+pip install modelscope vllm==0.15.1 -i https://mirrors.aliyun.com/pypi/simple/
+```
+
+If `conda` is not installed yet, you can install Miniconda or Anaconda first, then re-run the commands above.
+
+### Step 2: Fast Model Download (ModelScope)
+
+Use the ModelScope SDK to download the pre-quantized model into a local `./models` directory:
+
+```bash
+python -c "from modelscope import snapshot_download; \
+model_dir = snapshot_download('Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8', cache_dir='./models'); \
+print('\n' + '-'*20 + '\nModel Path:', model_dir)"
+```
+
+Take note of the printed **Model Path** (for example `./models/Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8`).
+
+### Step 3: Optimized vLLM Launch (Infra-tuned)
+
+For a 12GB GPU, the following launch command enables **Marlin-accelerated GPTQ** and **FP8 KV cache compression**, along with a longer context length:
+
+```bash
+python -m vllm.entrypoints.openai.api_server \
+    --model ./models/Qwen/Qwen2.5-7B-Instruct-GPTQ-Int8 \
+    --quantization gptq_marlin \
+    --kv-cache-dtype fp8 \
+    --gpu-memory-utilization 0.90 \
+    --max-model-len 8192 \
+    --enable-prefix-caching \
+    --served-model-name qwen-infra \
+    --port 8000 \
+    --host 0.0.0.0
+```
+
+You can then point the frontend (or any OpenAI-compatible client) to:
+
+- `POST /v1/chat/completions` with `model: "qwen-infra"`
+
+---
+
 ## Features
 
 ### Chat Interface
